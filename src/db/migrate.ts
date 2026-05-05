@@ -24,7 +24,7 @@ export async function runMigrations(): Promise<void> {
     console.warn("[migrate] DATABASE_URL missing and PGlite not active — skipping");
     return;
   }
-  const client = postgres(url, { max: 1 });
+  const client = postgres(url, { max: 1, prepare: false });
   try {
     const migrationDb = drizzlePg(client);
     await migratePg(migrationDb, { migrationsFolder: "./drizzle" });

@@ -26,7 +26,10 @@ export const usingPglite = !url;
 export const db = (() => {
   if (url) {
     console.log("[db] connecting to Postgres via DATABASE_URL");
-    const client = postgres(url, { max: 10 });
+    // prepare: false → required for Supabase Transaction pooler (port 6543) and
+    // any pgBouncer-style pooler that doesn't preserve prepared statements
+    // across sessions. Harmless on direct/session-pooler connections.
+    const client = postgres(url, { max: 10, prepare: false });
     return drizzlePg(client, { schema });
   }
   console.log(`[db] using embedded PGlite at ${PGLITE_DATA_DIR}`);
