@@ -38,6 +38,15 @@ export const config = {
     apiKey: process.env.GEMINI_API_KEY ?? "",
     model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
   },
+
+  supabase: {
+    /** https://<project>.supabase.co — base API URL */
+    url: process.env.SUPABASE_URL ?? "",
+    /** Public anon key — safe to expose to browser */
+    anonKey: process.env.SUPABASE_ANON_KEY ?? "",
+    /** Server-side admin key — NEVER expose to browser */
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  },
 } as const;
 
 export const isMockMode = () => config.mockMode;
