@@ -1,21 +1,40 @@
-import { Hono } from "hono";
+import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
+import { Hono } from "hono";
 import { z } from "zod";
+import { upsertBySallaStoreId } from "../db/repos/merchants.js";
+import {
+  buildInstallUrl,
+  exchangeCode,
+  fetchStoreInfo,
+} from "../salla/client.js";
+import {
+  handleSallaEvent,
+  type SallaEventEnvelope,
+} from "../salla/event-router.js";
+import { verifySallaSignature } from "../salla/webhook-verify.js";
 
 /**
  * Salla integration routes.
  *
- * Endpoints:
- *   POST /salla/oauth/exchange     — exchange OAuth code for access token (called from frontend callback)
- *   POST /salla/webhook            — receive merchant events (orders, abandoned carts, etc.)
- *   GET  /salla/install            — start the OAuth flow (returns Salla install URL)
- *
- * STUBBED: real implementation requires SALLA_CLIENT_ID / SALLA_CLIENT_SECRET
- * and signature verification on webhook payloads.
+ *   GET  /salla/install          → returns OAuth install URL (frontend can redirect to it)
+ *   POST /salla/oauth/exchange   → frontend posts the auth code; we exchange + persist
+ *   POST /salla/webhook          → Salla pushes merchant events here (HMAC-signed)
  *
  * Docs: https://docs.salla.dev
  */
 export const salla = new Hono();
+
+salla.get("/install", (c) => {
+  try {
+    const state = randomUUID();
+    const url = buildInstallUrl(state);
+    return c.json({ install_url: url, state });
+  } catch (err) {
+    console.error("[salla/install]", err);
+    return c.json({ error: "salla_credentials_missing" }, 500);
+  }
+});
 
 const exchangeSchema = z.object({
   code: z.string().min(1),
@@ -25,46 +44,56 @@ const exchangeSchema = z.object({
 salla.post("/oauth/exchange", zValidator("json", exchangeSchema), async (c) => {
   const { code } = c.req.valid("json");
 
-  const clientId = process.env.SALLA_CLIENT_ID;
-  const clientSecret = process.env.SALLA_CLIENT_SECRET;
-  const redirectUri = process.env.SALLA_REDIRECT_URI;
+  try {
+    const tokens = await exchangeCode(code);
+    const store = await fetchStoreInfo(tokens.access_token);
 
-  if (!clientId || !clientSecret || !redirectUri) {
-    return c.json({ error: "salla_credentials_missing" }, 500);
+    const merchant = await upsertBySallaStoreId({
+      sallaStoreId: String(store.id),
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+      name: store.name,
+      domain: store.domain ?? undefined,
+      email: store.email ?? undefined,
+      plan: "starter",
+    });
+
+    return c.json({
+      ok: true,
+      merchant: {
+        id: merchant.id,
+        sallaStoreId: merchant.sallaStoreId,
+        name: merchant.name,
+      },
+    });
+  } catch (err) {
+    console.error("[salla/oauth/exchange]", err);
+    return c.json({ error: "exchange_failed", detail: String(err) }, 500);
   }
-
-  // TODO: POST to https://accounts.salla.sa/oauth2/token with code+grant_type
-  // TODO: persist merchant + tokens in db (merchants table)
-  // TODO: subscribe to webhooks for this merchant
-  console.log("[salla] oauth exchange request received", { code });
-
-  return c.json({ ok: true, todo: "implement_token_exchange" });
 });
 
 salla.post("/webhook", async (c) => {
-  // TODO: verify x-salla-signature header against SALLA_WEBHOOK_SECRET
-  // TODO: route by event.type:
-  //   order.created            → store + maybe notify merchant on WA
-  //   order.payment.failed     → trigger fallback flow
-  //   abandoned.cart           → schedule recovery messages
-  //   product.updated          → invalidate caches
-  const body = await c.req.json().catch(() => ({}));
-  console.log("[salla] webhook received", { event: body?.event });
-  return c.json({ received: true });
-});
+  const rawBody = await c.req.text();
+  const signature = c.req.header("x-salla-signature");
 
-salla.get("/install", (c) => {
-  const clientId = process.env.SALLA_CLIENT_ID;
-  const redirectUri = process.env.SALLA_REDIRECT_URI;
-  if (!clientId || !redirectUri) {
-    return c.json({ error: "salla_credentials_missing" }, 500);
+  if (!verifySallaSignature(rawBody, signature)) {
+    console.warn("[salla/webhook] signature_invalid");
+    return c.json({ error: "invalid_signature" }, 401);
   }
-  const state = crypto.randomUUID();
-  const url = new URL("https://accounts.salla.sa/oauth2/auth");
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("state", state);
-  url.searchParams.set("scope", "offline_access");
-  return c.json({ install_url: url.toString(), state });
+
+  let envelope: SallaEventEnvelope;
+  try {
+    envelope = JSON.parse(rawBody) as SallaEventEnvelope;
+  } catch {
+    return c.json({ error: "invalid_json" }, 400);
+  }
+
+  try {
+    const result = await handleSallaEvent(envelope);
+    return c.json({ received: true, ...result });
+  } catch (err) {
+    console.error("[salla/webhook] handler error", err);
+    return c.json({ error: "handler_failed", detail: String(err) }, 500);
+  }
 });

@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { runMigrations } from "./db/migrate.js";
 import { health } from "./routes/health.js";
 import { salla } from "./routes/salla.js";
 import { whatsapp } from "./routes/whatsapp.js";
@@ -32,6 +33,14 @@ app.get("/", (c) => c.json({ name: "anvira-salla-backend", version: "0.1.0" }));
 
 const port = Number(process.env.PORT ?? 8080);
 
-serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`anvira-salla-backend listening on :${info.port}`);
+async function bootstrap() {
+  await runMigrations();
+  serve({ fetch: app.fetch, port }, (info) => {
+    console.log(`anvira-salla-backend listening on :${info.port}`);
+  });
+}
+
+bootstrap().catch((err) => {
+  console.error("[boot] fatal:", err);
+  process.exit(1);
 });
