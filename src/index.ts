@@ -2,10 +2,18 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { config, isMockMode } from "./config.js";
+import { db } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
+import { abandonedCarts } from "./routes/abandoned-carts.js";
+import { conversations } from "./routes/conversations.js";
+import { dev } from "./routes/dev.js";
 import { health } from "./routes/health.js";
+import { orders } from "./routes/orders.js";
 import { salla } from "./routes/salla.js";
+import { users } from "./routes/users.js";
 import { whatsapp } from "./routes/whatsapp.js";
+import { ensureDemoSeed } from "./seed/demo-seed.js";
 
 const app = new Hono();
 
@@ -15,28 +23,48 @@ app.use(
   cors({
     origin: (origin) => {
       const allowed = [
-        process.env.FRONTEND_URL ?? "http://localhost:3000",
+        config.frontendUrl,
+        "http://localhost:3000",
         "https://salla.sa",
       ];
       if (!origin) return allowed[0];
       return allowed.find((o) => origin.startsWith(o)) ?? allowed[0];
     },
     credentials: true,
+    allowHeaders: ["Content-Type", "X-Merchant-Id", "X-User-Id"],
   })
 );
 
 app.route("/health", health);
 app.route("/salla", salla);
 app.route("/whatsapp", whatsapp);
+app.route("/conversations", conversations);
+app.route("/abandoned-carts", abandonedCarts);
+app.route("/users", users);
+app.route("/orders", orders);
+app.route("/dev", dev);
 
-app.get("/", (c) => c.json({ name: "anvira-salla-backend", version: "0.1.0" }));
-
-const port = Number(process.env.PORT ?? 8080);
+app.get("/", (c) =>
+  c.json({
+    name: "anvira-salla-backend",
+    version: "0.1.0",
+    mockMode: isMockMode(),
+  })
+);
 
 async function bootstrap() {
   await runMigrations();
-  serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`anvira-salla-backend listening on :${info.port}`);
+  if (isMockMode() && db) {
+    try {
+      await ensureDemoSeed();
+    } catch (err) {
+      console.warn("[seed] failed (non-fatal):", err);
+    }
+  }
+  serve({ fetch: app.fetch, port: config.port }, (info) => {
+    console.log(
+      `anvira-salla-backend listening on :${info.port} (mockMode=${isMockMode()})`
+    );
   });
 }
 

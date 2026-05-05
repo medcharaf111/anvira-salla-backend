@@ -1,19 +1,41 @@
-import { drizzle } from "drizzle-orm/postgres-js";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle as drizzlePg } from "drizzle-orm/postgres-js";
+import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import postgres from "postgres";
 import * as schema from "./schema.js";
 
-const connectionString = process.env.DATABASE_URL;
+/**
+ * Database client.
+ *
+ * Strategy:
+ *   - If DATABASE_URL is set → real Postgres (Railway, Neon, etc.) via postgres-js
+ *   - Otherwise → embedded PGlite (file-backed at ./.pglite-data), zero-setup demo
+ *
+ * Same schema, same migrations work for both because PGlite IS Postgres
+ * (compiled to WASM). This keeps the demo runnable on any machine while
+ * staying production-aligned.
+ */
 
-if (!connectionString) {
-  console.warn(
-    "[db] DATABASE_URL not set — db client unavailable. Set it in Railway env."
-  );
+const url = process.env.DATABASE_URL;
+const PGLITE_DATA_DIR = process.env.PGLITE_DATA_DIR ?? "./.pglite-data";
+
+let pglite: PGlite | null = null;
+
+export const usingPglite = !url;
+
+export const db = (() => {
+  if (url) {
+    console.log("[db] connecting to Postgres via DATABASE_URL");
+    const client = postgres(url, { max: 10 });
+    return drizzlePg(client, { schema });
+  }
+  console.log(`[db] using embedded PGlite at ${PGLITE_DATA_DIR}`);
+  pglite = new PGlite(PGLITE_DATA_DIR);
+  return drizzlePglite(pglite, { schema });
+})();
+
+export function getPgliteInstance(): PGlite | null {
+  return pglite;
 }
-
-export const sql = connectionString
-  ? postgres(connectionString, { max: 10 })
-  : null;
-
-export const db = sql ? drizzle(sql, { schema }) : null;
 
 export { schema };

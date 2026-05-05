@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { isMockMode } from "../config.js";
 import { upsertBySallaStoreId } from "../db/repos/merchants.js";
 import {
   buildInstallUrl,
@@ -13,6 +14,7 @@ import {
   type SallaEventEnvelope,
 } from "../salla/event-router.js";
 import { verifySallaSignature } from "../salla/webhook-verify.js";
+import { ensureDemoSeed } from "../seed/demo-seed.js";
 
 /**
  * Salla integration routes.
@@ -26,6 +28,15 @@ import { verifySallaSignature } from "../salla/webhook-verify.js";
 export const salla = new Hono();
 
 salla.get("/install", (c) => {
+  if (isMockMode()) {
+    // In mock mode, "installing" just bootstraps the demo seed and routes
+    // straight to the dashboard — bypasses the real Salla consent screen.
+    return c.json({
+      install_url: "/dashboard?mock_install=1",
+      state: "mock-state",
+      mock: true,
+    });
+  }
   try {
     const state = randomUUID();
     const url = buildInstallUrl(state);
@@ -43,6 +54,16 @@ const exchangeSchema = z.object({
 
 salla.post("/oauth/exchange", zValidator("json", exchangeSchema), async (c) => {
   const { code } = c.req.valid("json");
+
+  if (isMockMode()) {
+    const seed = await ensureDemoSeed();
+    if (!seed) return c.json({ error: "seed_failed" }, 500);
+    return c.json({
+      ok: true,
+      mock: true,
+      merchant: { id: seed.merchantId, name: "متجر الأناقة" },
+    });
+  }
 
   try {
     const tokens = await exchangeCode(code);
