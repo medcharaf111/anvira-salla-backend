@@ -24,17 +24,31 @@ import { ensureDemoSeed } from "./seed/demo-seed.js";
 const app = new Hono();
 
 app.use("*", logger());
+
+const stripTrailingSlash = (s: string) => s.replace(/\/+$/, "");
+
+const allowedOrigins = [
+  stripTrailingSlash(config.frontendUrl),
+  "http://localhost:3000",
+  "http://localhost:3001",
+];
+
 app.use(
   "*",
   cors({
     origin: (origin) => {
-      const allowed = [
-        config.frontendUrl,
-        "http://localhost:3000",
-        "https://salla.sa",
-      ];
-      if (!origin) return allowed[0];
-      return allowed.find((o) => origin.startsWith(o)) ?? allowed[0];
+      // server-to-server / curl with no Origin header — let it through
+      if (!origin) return "*";
+      const normalized = stripTrailingSlash(origin);
+      // Exact match on configured frontend or local dev
+      if (allowedOrigins.includes(normalized)) return origin;
+      // Allow any Vercel preview deployment for this project
+      if (/^https:\/\/anvira-salla-frontend(?:-[\w-]+)?\.vercel\.app$/.test(normalized)) {
+        return origin;
+      }
+      // Allow Salla subdomains (when running embedded in Salla App Store)
+      if (/^https:\/\/[\w-]+\.salla\.sa$/.test(normalized)) return origin;
+      return null;
     },
     credentials: true,
     allowHeaders: ["Content-Type", "X-Merchant-Id", "X-User-Id"],
