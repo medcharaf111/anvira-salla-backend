@@ -7,7 +7,9 @@ dist/
 .DS_Store
 .vscode/
 .idea/
-drizzle/meta/
+
+# NOTE: drizzle/meta/ MUST be committed — the migrator needs _journal.json
+# at runtime to know which SQL files to apply.
 
 # Embedded PGlite data (zero-setup demo db) — local artifact, never commit
 .pglite-data/
