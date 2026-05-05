@@ -187,7 +187,7 @@ conversations.get("/:id/suggest-replies", async (c) => {
     .where(eq(schema.messages.conversationId, id))
     .orderBy(schema.messages.createdAt);
 
-  const suggestions = await suggestReplies({
+  const result = await suggestReplies({
     merchantName: merchant.name,
     customerName: convRows[0].customerName,
     history: messages.map((m) => ({
@@ -196,5 +196,5 @@ conversations.get("/:id/suggest-replies", async (c) => {
     })),
   });
 
-  return c.json({ suggestions });
+  return c.json({ suggestions: result.suggestions, source: result.source });
 });

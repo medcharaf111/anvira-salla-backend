@@ -62,12 +62,13 @@ abandonedCarts.post("/:id/recover", async (c) => {
     ? ((cart.rawPayload as any).products as string[])
     : [];
 
-  const draft = await draftCartRecoveryMessage({
+  const drafted = await draftCartRecoveryMessage({
     merchantName: merchant.name,
     customerName: null,
     cartTotalSar: Math.round((cart.totalAmount ?? 0) / 100),
     productNames,
   });
+  const draft = drafted.text;
 
   const send = await sendWhatsApp({
     to: cart.customerPhone,
@@ -122,7 +123,13 @@ abandonedCarts.post("/:id/recover", async (c) => {
     .set({ recoveryMessageSentAt: new Date() })
     .where(eq(schema.abandonedCarts.id, id));
 
-  return c.json({ ok: true, draft, whatsapp: send, conversationId });
+  return c.json({
+    ok: true,
+    draft,
+    aiSource: drafted.source,
+    whatsapp: send,
+    conversationId,
+  });
 });
 
 abandonedCarts.get("/pending", async (c) => {
