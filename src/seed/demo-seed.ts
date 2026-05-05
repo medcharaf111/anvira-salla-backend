@@ -258,6 +258,278 @@ export async function ensureDemoSeed() {
     console.log(`[seed] created ${cartsSeed.length} abandoned carts`);
   }
 
+  // ---- Tasks ----
+  const existingTasks = await db
+    .select()
+    .from(schema.tasks)
+    .where(eq(schema.tasks.merchantId, merchantId));
+
+  if (existingTasks.length === 0) {
+    const ahmedId = users.find((u) => u.name.includes("أحمد"))?.id ?? users[0].id;
+    const tasksSeed = [
+      {
+        title: "متابعة طلب 1042 — تأخير شحن للرياض",
+        description: "العميلة فاطمة سألت عن وضع شحنتها. التأكد من شركة التوصيل اليوم.",
+        status: "todo",
+        assignedUserId: noraId,
+        sallaOrderId: "1042",
+      },
+      {
+        title: "تجهيز عرض ترويجي لرمضان",
+        description: "تنسيق مع التسويق على باقة عطور بأسعار خاصة.",
+        status: "in_progress",
+        assignedUserId: ownerId,
+      },
+      {
+        title: "الرد على استفسار العميل خالد عن العطر الذهبي",
+        description: "إرسال السعر والمواصفات وروابط المنتج.",
+        status: "todo",
+        assignedUserId: noraId,
+      },
+      {
+        title: "إعداد قائمة المنتجات الأكثر مبيعاً للأسبوع",
+        description: "تقرير أسبوعي للعمليات.",
+        status: "in_progress",
+        assignedUserId: ahmedId,
+      },
+      {
+        title: "تحديث وصف منتج 'عباية كلاسيكية' في سلة",
+        description: "إضافة قياسات تفصيلية.",
+        status: "done",
+        assignedUserId: ownerId,
+        completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      },
+      {
+        title: "اتصال بالمراجع محمد القحطاني لتأكيد إرجاع طلب 1038",
+        description: "العميل طلب الإرجاع، التأكد من الاستلام.",
+        status: "done",
+        assignedUserId: ownerId,
+        completedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    ];
+
+    for (const t of tasksSeed) {
+      await db.insert(schema.tasks).values({
+        merchantId,
+        title: t.title,
+        description: t.description,
+        status: t.status,
+        assignedUserId: t.assignedUserId,
+        createdByUserId: ownerId,
+        sallaOrderId: t.sallaOrderId ?? null,
+        completedAt: t.completedAt ?? null,
+      });
+    }
+    console.log(`[seed] created ${tasksSeed.length} tasks`);
+  }
+
+  // ---- Customer notes ----
+  const existingNotes = await db
+    .select()
+    .from(schema.customerNotes)
+    .where(eq(schema.customerNotes.merchantId, merchantId));
+
+  if (existingNotes.length === 0) {
+    const ownerLocal = ownerId;
+    const noraLocal = noraId;
+    const notesSeed = [
+      {
+        customerPhone: "+966551234567",
+        body: "عميل دائم، يفضل التواصل بعد العصر. اشترى ٣ مرات هذا الشهر.",
+        author: ownerLocal,
+      },
+      {
+        customerPhone: "+966509876543",
+        body: "حساسة من بعض العطور (المسك القوي). اقتراح: العطور الفواحة الخفيفة.",
+        author: noraLocal,
+      },
+      {
+        customerPhone: "+966533445566",
+        body: "مرتجع طلب من قبل بسبب المقاس. التحقق من الجدول الإرشادي قبل تأكيد الطلب.",
+        author: ownerLocal,
+      },
+    ];
+    for (const n of notesSeed) {
+      await db.insert(schema.customerNotes).values({
+        merchantId,
+        customerPhone: n.customerPhone,
+        body: n.body,
+        authorUserId: n.author,
+      });
+    }
+    console.log(`[seed] created ${notesSeed.length} customer notes`);
+  }
+
+  // ---- Team channels + messages ----
+  const existingChannels = await db
+    .select()
+    .from(schema.teamChannels)
+    .where(eq(schema.teamChannels.merchantId, merchantId));
+
+  if (existingChannels.length === 0) {
+    const channelsSeed = [
+      { name: "general", description: "محادثات الفريق العامة", kind: "channel" },
+      { name: "support", description: "تنسيق دعم العملاء", kind: "channel" },
+      { name: "marketing", description: "حملات التسويق والعروض", kind: "channel" },
+    ];
+    const ownerLocal = ownerId;
+    const noraLocal = noraId;
+    for (const ch of channelsSeed) {
+      const [created] = await db
+        .insert(schema.teamChannels)
+        .values({
+          merchantId,
+          name: ch.name,
+          description: ch.description,
+          kind: ch.kind,
+        })
+        .returning();
+      const messagesSeed: { author: string; body: string; minutesAgo: number }[] =
+        ch.name === "general"
+          ? [
+              {
+                author: ownerLocal,
+                body: "صباح الخير 👋 يومنا اليوم ٢٤ طلب جديد، بداية ممتازة!",
+                minutesAgo: 480,
+              },
+              {
+                author: noraLocal,
+                body: "صباح النور، خلصت من ١٢ محادثة من الصباح",
+                minutesAgo: 470,
+              },
+              {
+                author: ownerLocal,
+                body: "ممتاز نورا، استمري على هذا المنوال 🌟",
+                minutesAgo: 465,
+              },
+            ]
+          : ch.name === "support"
+            ? [
+                {
+                  author: noraLocal,
+                  body: "الموردون أكدوا وصول دفعة العطور الجديدة الأحد",
+                  minutesAgo: 360,
+                },
+                {
+                  author: ownerLocal,
+                  body: "تمام، نحضر للحملة بعد ما توصل",
+                  minutesAgo: 355,
+                },
+              ]
+            : [
+                {
+                  author: ownerLocal,
+                  body: "اقتراح: حملة استرجاع سلات هذا الأسبوع، Anvira تتولى الصياغة",
+                  minutesAgo: 240,
+                },
+              ];
+      for (const m of messagesSeed) {
+        await db.insert(schema.teamMessages).values({
+          channelId: created.id,
+          authorUserId: m.author,
+          body: m.body,
+          createdAt: new Date(Date.now() - m.minutesAgo * 60 * 1000),
+        });
+      }
+    }
+    console.log(`[seed] created ${channelsSeed.length} channels with messages`);
+  }
+
+  // ---- Workflow templates ----
+  const existingWorkflows = await db
+    .select()
+    .from(schema.workflowTemplates)
+    .where(eq(schema.workflowTemplates.merchantId, merchantId));
+
+  if (existingWorkflows.length === 0) {
+    const workflowsSeed = [
+      {
+        slug: "abandoned-cart-recovery",
+        name: "استرجاع السلات المهجورة",
+        description: "إذا ترك عميل سلته بدون إكمال خلال ٣٠ دقيقة، أرسل رسالة استرجاع AI.",
+        trigger: "salla.abandoned_cart",
+        action: "whatsapp.send_recovery",
+        enabled: true,
+      },
+      {
+        slug: "order-confirmation",
+        name: "تأكيد إكمال الطلب",
+        description: "عند إتمام الطلب، أرسل رسالة شكر تتضمن رابط التتبع.",
+        trigger: "salla.order_completed",
+        action: "whatsapp.send_thanks",
+        enabled: true,
+      },
+      {
+        slug: "appointment-reminder",
+        name: "تذكير قبل الموعد",
+        description: "قبل ٢٤ ساعة من موعد الزبون، أرسل تذكير واتساب.",
+        trigger: "calendar.upcoming_appointment",
+        action: "whatsapp.send_reminder",
+        enabled: false,
+      },
+      {
+        slug: "complaint-escalation",
+        name: "تصعيد الشكاوى",
+        description: "عند رصد شكوى من رسالة العميل، أنشئ تاسك للمالك.",
+        trigger: "ai.complaint_detected",
+        action: "tasks.create_for_owner",
+        enabled: false,
+      },
+      {
+        slug: "weekend-handover",
+        name: "تسليم نهاية الأسبوع",
+        description: "تلخيص محادثات الجمعة الصباحية وإرسالها للموظف المناوب.",
+        trigger: "schedule.friday_morning",
+        action: "ai.weekly_summary",
+        enabled: false,
+      },
+    ];
+    for (const w of workflowsSeed) {
+      await db.insert(schema.workflowTemplates).values({
+        merchantId,
+        slug: w.slug,
+        name: w.name,
+        description: w.description,
+        trigger: w.trigger,
+        action: w.action,
+        enabled: w.enabled,
+      });
+    }
+    console.log(`[seed] created ${workflowsSeed.length} workflow templates`);
+  }
+
+  // ---- Activity log (some sample events) ----
+  const existingActivity = await db
+    .select()
+    .from(schema.activityLog)
+    .where(eq(schema.activityLog.merchantId, merchantId));
+
+  if (existingActivity.length === 0) {
+    const ownerLocal = ownerId;
+    const noraLocal = noraId;
+    const activitySeed = [
+      { actor: ownerLocal, action: "merchant.installed", kind: "merchant", id: merchantId, hoursAgo: 168 },
+      { actor: ownerLocal, action: "user.invited", kind: "user", id: noraLocal, hoursAgo: 167, meta: { name: "نورا" } },
+      { actor: noraLocal, action: "conversation.replied", kind: "conversation", id: null, hoursAgo: 4 },
+      { actor: ownerLocal, action: "cart.recovered", kind: "abandoned_cart", id: null, hoursAgo: 3 },
+      { actor: ownerLocal, action: "task.created", kind: "task", id: null, hoursAgo: 2, meta: { title: "تجهيز عرض ترويجي" } },
+      { actor: noraLocal, action: "task.completed", kind: "task", id: null, hoursAgo: 1, meta: { title: "تحديث وصف منتج" } },
+      { actor: ownerLocal, action: "workflow.enabled", kind: "workflow", id: null, hoursAgo: 0.5, meta: { slug: "abandoned-cart-recovery" } },
+    ];
+    for (const a of activitySeed) {
+      await db.insert(schema.activityLog).values({
+        merchantId,
+        actorUserId: a.actor,
+        action: a.action,
+        targetKind: a.kind,
+        targetId: a.id,
+        metadata: a.meta ?? null,
+        createdAt: new Date(Date.now() - a.hoursAgo * 60 * 60 * 1000),
+      });
+    }
+    console.log(`[seed] created ${activitySeed.length} activity log entries`);
+  }
+
   return {
     merchantId,
     users: users.map((u) => ({

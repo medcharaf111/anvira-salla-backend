@@ -9,9 +9,17 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Anvira data model — v1 (lean).
- * Covers: merchants, users (agents), conversations, messages, orders mirror.
- * Excluded for v1: tasks, team_chats, workflows, app_center.
+ * Anvira data model.
+ *
+ * Covers:
+ *   - Salla merchants + their team users
+ *   - WhatsApp conversations + messages
+ *   - Salla orders mirror + abandoned carts
+ *   - Tasks linked to conversations / orders
+ *   - Customer notes (CRM)
+ *   - Activity log (audit trail)
+ *   - Internal team chat (channels + messages)
+ *   - Workflow templates (toggleable automations)
  */
 
 export const merchants = pgTable("merchants", {
@@ -95,5 +103,91 @@ export const abandonedCarts = pgTable("abandoned_carts", {
   recoveredAt: timestamp("recovered_at"),
   recoveryMessageSentAt: timestamp("recovery_message_sent_at"),
   rawPayload: jsonb("raw_payload"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Tasks ---------- */
+export const tasks = pgTable("tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default("todo"),
+  assignedUserId: uuid("assigned_user_id").references(() => users.id),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  conversationId: uuid("conversation_id").references(() => conversations.id, {
+    onDelete: "set null",
+  }),
+  sallaOrderId: text("salla_order_id"),
+  dueAt: timestamp("due_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Customer notes (CRM) ---------- */
+export const customerNotes = pgTable("customer_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  customerPhone: text("customer_phone").notNull(),
+  body: text("body").notNull(),
+  authorUserId: uuid("author_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Activity log ---------- */
+export const activityLog = pgTable("activity_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  actorUserId: uuid("actor_user_id").references(() => users.id),
+  action: text("action").notNull(),
+  targetKind: text("target_kind"),
+  targetId: text("target_id"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Team chat ---------- */
+export const teamChannels = pgTable("team_channels", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("channel"),
+  description: text("description"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const teamMessages = pgTable("team_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  channelId: uuid("channel_id")
+    .notNull()
+    .references(() => teamChannels.id, { onDelete: "cascade" }),
+  authorUserId: uuid("author_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  mentions: jsonb("mentions"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Workflow templates ---------- */
+export const workflowTemplates = pgTable("workflow_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  trigger: text("trigger").notNull(),
+  action: text("action").notNull(),
+  enabled: boolean("enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

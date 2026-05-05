@@ -103,6 +103,122 @@ export interface CartRecoveryContext {
 /**
  * Generate a single cart-recovery WhatsApp message (Khaleeji Arabic).
  */
+export async function summarizeConversation(
+  ctx: ConversationContext
+): Promise<{ text: string; source: "gemini" | "fallback" }> {
+  const transcript = ctx.history
+    .map((m) => `${m.direction === "in" ? "العميل" : "العيادة"}: ${m.body}`)
+    .join("\n");
+
+  const prompt = `لخّص المحادثة التالية في 3 نقاط قصيرة ومركّزة (سطر لكل نقطة) باللغة العربية:
+- نقطة الطلب الرئيسية للعميل
+- الحالة الحالية والإجراء المطلوب
+- أي تفصيل مهم لاحظته
+
+المحادثة:
+${transcript}
+
+رد بالنقاط الثلاثة فقط، بصيغة:
+١. ...
+٢. ...
+٣. ...`;
+
+  const fallback = `١. عميل تواصل عبر الواتساب باستفسار.
+٢. الحالة: المحادثة مفتوحة، يحتاج متابعة.
+٣. (تعذّر إنشاء الملخص الذكي حالياً، استخدم النص الكامل للمحادثة)`;
+
+  return await generate(prompt, fallback);
+}
+
+export interface SentimentAnalysis {
+  positive: number;
+  neutral: number;
+  negative: number;
+  source: "gemini" | "fallback";
+}
+
+export async function classifySentimentBatch(
+  conversations: { id: string; lastMessage: string }[]
+): Promise<{
+  byId: Record<string, "positive" | "neutral" | "negative">;
+  source: "gemini" | "fallback";
+}> {
+  if (conversations.length === 0) {
+    return { byId: {}, source: "fallback" };
+  }
+  const list = conversations
+    .map((c, i) => `${i + 1}. [${c.id}] "${c.lastMessage}"`)
+    .join("\n");
+  const prompt = `صنّف نبرة كل رسالة من رسائل العملاء التالية إلى واحدة من ثلاث:
+- positive (راضٍ، شاكر، حماسي)
+- neutral (سؤال، استفسار، حيادي)
+- negative (شكوى، مستاء، غاضب)
+
+الرسائل:
+${list}
+
+رد بصيغة JSON فقط، object بالـ id كمفتاح والتصنيف كقيمة. مثال:
+{"abc-123": "positive", "def-456": "neutral"}`;
+
+  const fallbackJson = JSON.stringify(
+    Object.fromEntries(conversations.map((c) => [c.id, "neutral"]))
+  );
+
+  const result = await generate(prompt, fallbackJson);
+  try {
+    const cleaned = result.text.replace(/```(?:json)?/g, "").trim();
+    const parsed = JSON.parse(cleaned) as Record<string, string>;
+    const byId: Record<string, "positive" | "neutral" | "negative"> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const norm = String(v).toLowerCase();
+      if (norm === "positive" || norm === "negative" || norm === "neutral") {
+        byId[k] = norm;
+      } else {
+        byId[k] = "neutral";
+      }
+    }
+    return { byId, source: result.source };
+  } catch {
+    return {
+      byId: Object.fromEntries(
+        conversations.map((c) => [c.id, "neutral" as const])
+      ),
+      source: "fallback",
+    };
+  }
+}
+
+export async function extractTopQuestions(
+  customerMessages: string[]
+): Promise<{ questions: string[]; source: "gemini" | "fallback" }> {
+  if (customerMessages.length === 0) {
+    return { questions: [], source: "fallback" };
+  }
+  const sample = customerMessages.slice(-30).join("\n- ");
+  const prompt = `هذه رسائل عملاء وردت على الواتساب لمتجر إلكتروني:
+- ${sample}
+
+استخرج أكثر ٥ أسئلة أو طلبات تكراراً (موضوع متكرر، مثلاً: "موعد الشحن"، "السعر"، "المقاسات"...)
+رد بصيغة قائمة مرقّمة باللغة العربية، كل سطر سؤال أو موضوع واحد فقط، بدون شرح.
+١. ...
+٢. ...`;
+
+  const fallback = `١. الاستفسار عن أسعار المنتجات
+٢. وقت الشحن
+٣. توفر المنتج
+٤. استرجاع الطلب
+٥. طرق الدفع`;
+
+  const result = await generate(prompt, fallback);
+  const lines = result.text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => l.replace(/^[\d٠-٩]+[).\s-]+/, "").trim())
+    .filter((l) => l.length > 2);
+  return { questions: lines.slice(0, 5), source: result.source };
+}
+
 export async function draftCartRecoveryMessage(
   ctx: CartRecoveryContext
 ): Promise<{ text: string; source: "gemini" | "fallback" }> {
