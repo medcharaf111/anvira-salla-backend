@@ -8,3 +8,7 @@ dist/
 .vscode/
 .idea/
 drizzle/meta/
+
+# Embedded PGlite data (zero-setup demo db) — local artifact, never commit
+.pglite-data/
+
