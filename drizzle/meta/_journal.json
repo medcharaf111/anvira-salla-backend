@@ -15,6 +15,13 @@
       "when": 1777992027476,
       "tag": "0001_absurd_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778086413718,
+      "tag": "0002_milky_mentor",
+      "breakpoints": true
     }
   ]
 }

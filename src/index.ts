@@ -7,11 +7,15 @@ import { db } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { abandonedCarts } from "./routes/abandoned-carts.js";
 import { activity } from "./routes/activity.js";
+import { apiKeys } from "./routes/api-keys.js";
 import { conversations } from "./routes/conversations.js";
 import { customers } from "./routes/customers.js";
+import { customWorkflows } from "./routes/custom-workflows.js";
 import { dev } from "./routes/dev.js";
 import { health } from "./routes/health.js";
 import { insights } from "./routes/insights.js";
+import { knowledge } from "./routes/knowledge.js";
+import { notifications } from "./routes/notifications.js";
 import { orders } from "./routes/orders.js";
 import { salla } from "./routes/salla.js";
 import { tasks } from "./routes/tasks.js";
@@ -68,6 +72,10 @@ app.route("/insights", insights);
 app.route("/activity", activity);
 app.route("/team", teamChat);
 app.route("/workflows", workflows);
+app.route("/custom-workflows", customWorkflows);
+app.route("/knowledge", knowledge);
+app.route("/api-keys", apiKeys);
+app.route("/notifications", notifications);
 app.route("/dev", dev);
 
 app.get("/", (c) =>

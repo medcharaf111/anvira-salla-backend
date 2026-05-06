@@ -55,6 +55,8 @@ export interface ConversationContext {
   merchantName: string;
   customerName: string | null;
   history: Array<{ direction: "in" | "out"; body: string }>;
+  /** Optional merchant knowledge base — Q&A pairs the AI should reference. */
+  knowledge?: Array<{ question: string; answer: string }>;
 }
 
 /**
@@ -69,13 +71,22 @@ export async function suggestReplies(
     .map((m) => `${m.direction === "in" ? "العميل" : "العيادة"}: ${m.body}`)
     .join("\n");
 
+  const knowledgeBlock =
+    ctx.knowledge && ctx.knowledge.length > 0
+      ? `\nقاعدة معلومات المتجر (استخدمها كمرجع للردود إذا كان السؤال متعلق):\n${ctx.knowledge
+          .slice(0, 10)
+          .map((k, i) => `${i + 1}. س: ${k.question}\n   ج: ${k.answer}`)
+          .join("\n")}\n`
+      : "";
+
   const prompt = `أنت مساعد خدمة عملاء لمتجر "${ctx.merchantName}".
 العميل: ${ctx.customerName ?? "غير معروف"}.
-
+${knowledgeBlock}
 المحادثة الأخيرة:
 ${transcript}
 
 اقترح ٣ ردود قصيرة مختلفة (كل رد سطر أو اثنين) بأسلوب خليجي ودود ومحترف.
+إذا كان سؤال العميل يطابق إحدى نقاط قاعدة المعلومات، استخدم الإجابة منها مباشرة (بصياغة طبيعية).
 رد فقط بالردود الثلاثة، كل واحد على سطر، مرقمة 1. 2. 3. — بدون أي شرح إضافي.`;
 
   const fallback = `1. هلا والله، شكراً للتواصل معنا 🙏 ممكن توضح طلبك أكثر؟

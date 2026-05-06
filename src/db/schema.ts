@@ -191,3 +191,72 @@ export const workflowTemplates = pgTable("workflow_templates", {
   enabled: boolean("enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+/* ---------- Custom workflows (built via visual editor) ---------- */
+export const workflows = pgTable("workflows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** React-flow nodes array — node types: trigger | condition | action */
+  nodes: jsonb("nodes").notNull().default([]),
+  /** React-flow edges array */
+  edges: jsonb("edges").notNull().default([]),
+  enabled: boolean("enabled").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/* ---------- Knowledge base ---------- */
+export const knowledgeEntries = pgTable("knowledge_entries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  tags: jsonb("tags").default([]),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Personal API keys ---------- */
+export const apiKeys = pgTable("api_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** Last 4 chars of the actual key for UI display ("...x9z2") */
+  keyPreview: text("key_preview").notNull(),
+  /** SHA-256 hash of the actual key. Real key shown only at creation. */
+  keyHash: text("key_hash").notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  /** Display-only counter for the demo. Bumped by stub middleware. */
+  callCount: integer("call_count").notNull().default(0),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* ---------- Notifications (in-app inbox for users) ---------- */
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id")
+    .notNull()
+    .references(() => merchants.id, { onDelete: "cascade" }),
+  /** Target user (null = all team members) */
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  /** e.g. mention | task.assigned | cart.recovered | conversation.assigned */
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body"),
+  /** Target link to navigate to on click (e.g. /dashboard/inbox?conv=...) */
+  href: text("href"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

@@ -530,6 +530,123 @@ export async function ensureDemoSeed() {
     console.log(`[seed] created ${activitySeed.length} activity log entries`);
   }
 
+  // ---- Knowledge base ----
+  const existingKb = await db
+    .select()
+    .from(schema.knowledgeEntries)
+    .where(eq(schema.knowledgeEntries.merchantId, merchantId));
+
+  if (existingKb.length === 0) {
+    const kbSeed = [
+      {
+        question: "كم تأخذ مدة الشحن؟",
+        answer: "الشحن داخل الرياض من 1 إلى 2 يوم عمل، ولبقية مدن المملكة من 2 إلى 4 أيام عمل. شحن مجاني للطلبات فوق 200 ريال.",
+        tags: ["شحن", "توصيل"],
+      },
+      {
+        question: "ما هي سياسة الإرجاع؟",
+        answer: "نقبل الإرجاع خلال 14 يوم من تاريخ الاستلام، شرط أن يكون المنتج بحالته الأصلية وغير مستخدم. التواصل معنا أولاً عبر الواتساب لتنسيق الإرجاع.",
+        tags: ["إرجاع", "سياسة"],
+      },
+      {
+        question: "ما هي وسائل الدفع المتاحة؟",
+        answer: "نقبل: مدى، فيزا، ماستركارد، Apple Pay، Tabby (تقسيط)، STC Pay، والدفع عند الاستلام للرياض فقط.",
+        tags: ["دفع"],
+      },
+      {
+        question: "كيف أعرف مقاسي الصحيح؟",
+        answer: "في صفحة كل منتج تجدون جدول المقاسات. لو احتجتم استشارة، أرسلوا الطول والوزن وسنرشح لكم المقاس الأنسب.",
+        tags: ["مقاس", "ملابس"],
+      },
+      {
+        question: "هل العطور أصلية؟",
+        answer: "كل العطور أصلية 100% ومن وكلاء معتمدين. كل قنينة عطر فيها باركود يمكنكم التحقق منه عبر تطبيق Authentic.",
+        tags: ["عطور", "أصلي"],
+      },
+    ];
+    for (const k of kbSeed) {
+      await db.insert(schema.knowledgeEntries).values({
+        merchantId,
+        question: k.question,
+        answer: k.answer,
+        tags: k.tags,
+      });
+    }
+    console.log(`[seed] created ${kbSeed.length} knowledge base entries`);
+  }
+
+  // ---- Custom workflows (built in visual editor) ----
+  const existingCustomWorkflows = await db
+    .select()
+    .from(schema.workflows)
+    .where(eq(schema.workflows.merchantId, merchantId));
+
+  if (existingCustomWorkflows.length === 0) {
+    await db.insert(schema.workflows).values({
+      merchantId,
+      name: "تذكير عملاء VIP بالعروض",
+      description: "كل خميس، أرسل قائمة العروض للعملاء بتقييم VIP",
+      nodes: [
+        { id: "trigger-1", type: "trigger", position: { x: 80, y: 80 }, data: { label: "كل خميس 10:00ص", kind: "schedule" } },
+        { id: "filter-1", type: "condition", position: { x: 80, y: 220 }, data: { label: "العملاء VIP فقط", kind: "filter", field: "tag", value: "vip" } },
+        { id: "action-1", type: "action", position: { x: 80, y: 360 }, data: { label: "أرسل واتساب: قائمة العروض", kind: "whatsapp.send_template", template: "weekly-offers" } },
+      ],
+      edges: [
+        { id: "e1", source: "trigger-1", target: "filter-1" },
+        { id: "e2", source: "filter-1", target: "action-1" },
+      ],
+      enabled: false,
+    });
+    console.log(`[seed] created 1 custom workflow`);
+  }
+
+  // ---- API keys ----
+  const existingKeys = await db
+    .select()
+    .from(schema.apiKeys)
+    .where(eq(schema.apiKeys.merchantId, merchantId));
+
+  if (existingKeys.length === 0) {
+    await db.insert(schema.apiKeys).values({
+      merchantId,
+      userId: ownerId,
+      name: "مفتاح سارة الافتراضي",
+      keyPreview: "x9z2",
+      keyHash: "demo-seed-hash",
+      callCount: 1247,
+      lastUsedAt: new Date(Date.now() - 30 * 60 * 1000),
+    });
+    console.log(`[seed] created 1 demo API key`);
+  }
+
+  // ---- Notifications ----
+  const existingNotifs = await db
+    .select()
+    .from(schema.notifications)
+    .where(eq(schema.notifications.merchantId, merchantId));
+
+  if (existingNotifs.length === 0) {
+    const notifSeed = [
+      { user: noraId, kind: "task.assigned", title: "تاسك جديد", body: "متابعة طلب 1042 — تأخير شحن للرياض", href: "/dashboard/tasks", minutesAgo: 30 },
+      { user: ownerId, kind: "cart.recovered", title: "سلة استرجعت", body: "+966554443332 أكمل طلباً بقيمة 389 ر.س بعد رسالة الاسترجاع", href: "/dashboard/carts", minutesAgo: 45 },
+      { user: noraId, kind: "mention", title: "ذكرتك سارة في #general", body: "ممتاز نورا، استمري على هذا المنوال 🌟", href: "/dashboard/team", minutesAgo: 60 },
+      { user: ownerId, kind: "conversation.unassigned", title: "محادثة بدون موظف", body: "عبدالله الدوسري: العطر الجديد متى ينزل؟", href: "/dashboard/inbox", minutesAgo: 15 },
+      { user: ownerId, kind: "ai.complaint_detected", title: "AI رصد شكوى محتملة", body: "محمد القحطاني: ابغى أرجع المنتج، ما عجبني المقاس", href: "/dashboard/inbox", minutesAgo: 90 },
+    ];
+    for (const n of notifSeed) {
+      await db.insert(schema.notifications).values({
+        merchantId,
+        userId: n.user,
+        kind: n.kind,
+        title: n.title,
+        body: n.body,
+        href: n.href,
+        createdAt: new Date(Date.now() - n.minutesAgo * 60 * 1000),
+      });
+    }
+    console.log(`[seed] created ${notifSeed.length} notifications`);
+  }
+
   return {
     merchantId,
     users: users.map((u) => ({
