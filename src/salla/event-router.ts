@@ -33,6 +33,8 @@ export async function handleSallaEvent(
   console.log(`[salla-webhook] event=${event} merchant=${sallaStoreId}`);
 
   switch (event) {
+    // app.store.authorize is Salla's Easy Mode event — same payload shape as app.installed
+    case "app.store.authorize":
     case "app.installed": {
       // App.installed payload includes access_token, refresh_token,
       // expires, merchant store info (name, domain, email).

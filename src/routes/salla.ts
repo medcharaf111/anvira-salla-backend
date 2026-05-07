@@ -13,7 +13,7 @@ import {
   handleSallaEvent,
   type SallaEventEnvelope,
 } from "../salla/event-router.js";
-import { verifySallaSignature } from "../salla/webhook-verify.js";
+import { verifySallaWebhook } from "../salla/webhook-verify.js";
 import { ensureDemoSeed } from "../seed/demo-seed.js";
 
 /**
@@ -110,11 +110,25 @@ salla.post("/oauth/exchange", zValidator("json", exchangeSchema), async (c) => {
 
 salla.post("/webhook", async (c) => {
   const rawBody = await c.req.text();
-  const signature = c.req.header("x-salla-signature");
 
-  if (!verifySallaSignature(rawBody, signature)) {
-    console.warn("[salla/webhook] signature_invalid");
-    return c.json({ error: "invalid_signature" }, 401);
+  // Collect every header so the verifier can try Signature OR Token mode.
+  const headers: Record<string, string | undefined> = {
+    "x-salla-signature": c.req.header("x-salla-signature"),
+    "x-salla-token": c.req.header("x-salla-token"),
+    authorization: c.req.header("authorization"),
+  };
+
+  const verify = verifySallaWebhook({ rawBody, headers });
+  if (!verify.valid) {
+    // Diagnostic — log header presence (no values) to help configure Salla
+    console.warn("[salla/webhook] verification_failed", {
+      detail: verify.detail,
+      bodyPreview: rawBody.slice(0, 120),
+    });
+    return c.json({ error: "invalid_signature", detail: verify.detail }, 401);
+  }
+  if (verify.mode !== "signature") {
+    console.log(`[salla/webhook] verified via ${verify.mode} mode`);
   }
 
   let envelope: SallaEventEnvelope;
