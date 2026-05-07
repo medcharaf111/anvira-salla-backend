@@ -71,10 +71,26 @@ dev.get("/me", async (c) => {
     activeMerchant = demo;
   }
 
-  const users = await db
+  let users = await db
     .select()
     .from(schema.users)
     .where(eq(schema.users.merchantId, activeMerchant.id));
+
+  // Lazy-create an owner user for real Salla merchants that don't have any
+  // (e.g. installs that happened before the auto-user-creation logic shipped).
+  if (users.length === 0 && activeMerchant.sallaStoreId !== "demo-1") {
+    await db.insert(schema.users).values({
+      merchantId: activeMerchant.id,
+      name: activeMerchant.name,
+      email: activeMerchant.email ?? `owner+${activeMerchant.sallaStoreId}@salla-merchant.local`,
+      whatsappDisplayName: activeMerchant.name,
+      role: "owner",
+    });
+    users = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.merchantId, activeMerchant.id));
+  }
 
   return c.json({
     merchantId: activeMerchant.id,
