@@ -1,6 +1,7 @@
 import { recordAbandonedCart } from "../db/repos/abandoned-carts.js";
 import { findBySallaStoreId, markUninstalled, upsertBySallaStoreId } from "../db/repos/merchants.js";
 import { recordOrder } from "../db/repos/orders.js";
+import { fetchStoreInfo } from "./client.js";
 
 /**
  * Salla webhook event payloads share a common envelope:
@@ -61,31 +62,63 @@ export async function handleSallaEvent(
       const merchantInfo =
         (dataAny.merchant as Record<string, unknown> | undefined) ?? {};
 
-      // Find existing merchant (e.g. created by an earlier app.store.authorize)
+      // Find existing merchant (e.g. created by an earlier app.installed)
       const existing = await findBySallaStoreId(sallaStoreId);
 
-      // If we have tokens, full upsert
-      if (access && refresh) {
+      // If we have an access_token, save it. In Easy Mode the refresh_token is
+      // often absent — Salla manages refresh server-side and we just receive
+      // updated tokens via subsequent app.store.authorize events.
+      if (access) {
+        // Initial save with token + whatever merchant info Salla included
         await upsertBySallaStoreId({
           sallaStoreId,
           accessToken: access,
-          refreshToken: refresh,
-          tokenExpiresAt: expires ? new Date(expires * 1000) : undefined,
+          refreshToken: refresh ?? existing?.refreshToken ?? null,
+          tokenExpiresAt: expires
+            ? new Date(expires * 1000)
+            : existing?.tokenExpiresAt ?? undefined,
           name: String(merchantInfo.name ?? existing?.name ?? `Salla store ${sallaStoreId}`),
-          domain: typeof merchantInfo.domain === "string" ? merchantInfo.domain : existing?.domain ?? undefined,
-          email: typeof merchantInfo.email === "string" ? merchantInfo.email : existing?.email ?? undefined,
+          domain:
+            typeof merchantInfo.domain === "string"
+              ? merchantInfo.domain
+              : existing?.domain ?? undefined,
+          email:
+            typeof merchantInfo.email === "string"
+              ? merchantInfo.email
+              : existing?.email ?? undefined,
           plan: existing?.plan ?? "starter",
         });
-        return { handled: true, note: "upserted_with_tokens" };
+
+        // Fetch full store info from Salla — populates name/domain/email
+        // when the webhook payload didn't include them
+        try {
+          const storeInfo = await fetchStoreInfo(access);
+          await upsertBySallaStoreId({
+            sallaStoreId,
+            accessToken: access,
+            refreshToken: refresh ?? existing?.refreshToken ?? null,
+            tokenExpiresAt: expires
+              ? new Date(expires * 1000)
+              : existing?.tokenExpiresAt ?? undefined,
+            name: storeInfo.name,
+            domain: storeInfo.domain ?? undefined,
+            email: storeInfo.email ?? undefined,
+            plan: existing?.plan ?? "starter",
+          });
+          console.log(`[salla-webhook] enriched merchant from /store/info: ${storeInfo.name}`);
+        } catch (err) {
+          console.warn("[salla-webhook] /store/info fetch failed (token may be a different scope):", err);
+        }
+
+        return { handled: true, note: "upserted_with_access_token" };
       }
 
-      // No tokens in payload — Custom Mode behavior. Create a stub merchant
-      // so the install is recorded; tokens arrive separately via /salla/oauth/exchange.
+      // No tokens at all — fall back to stub merchant from app.installed
       if (!existing) {
         await upsertBySallaStoreId({
           sallaStoreId,
           accessToken: "",
-          refreshToken: "",
+          refreshToken: null,
           tokenExpiresAt: undefined,
           name: String(merchantInfo.name ?? `Salla store ${sallaStoreId}`),
           domain: typeof merchantInfo.domain === "string" ? merchantInfo.domain : undefined,
@@ -94,7 +127,7 @@ export async function handleSallaEvent(
         });
         return { handled: true, note: "stub_created_awaiting_tokens" };
       }
-      return { handled: true, note: "merchant_already_exists_no_tokens" };
+      return { handled: true, note: "no_tokens_in_payload_yet" };
     }
 
     case "app.uninstalled":
