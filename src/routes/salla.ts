@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import { isMockMode } from "../config.js";
+import { config, isMockMode } from "../config.js";
 import { upsertBySallaStoreId } from "../db/repos/merchants.js";
 import {
   buildInstallUrl,
@@ -27,15 +27,25 @@ import { ensureDemoSeed } from "../seed/demo-seed.js";
  */
 export const salla = new Hono();
 
+/**
+ * Salla integration uses real OAuth whenever credentials are present —
+ * MOCK_MODE only short-circuits when there are NO Salla creds (so local
+ * dev still works without registering an app). This lets a deployment run
+ * with both seeded demo data AND real Salla installs simultaneously.
+ */
+const sallaConfigured = () =>
+  !!(config.salla.clientId && config.salla.clientSecret && config.salla.redirectUri);
+
 salla.get("/install", (c) => {
-  if (isMockMode()) {
-    // In mock mode, "installing" just bootstraps the demo seed and routes
-    // straight to the dashboard — bypasses the real Salla consent screen.
-    return c.json({
-      install_url: "/dashboard?mock_install=1",
-      state: "mock-state",
-      mock: true,
-    });
+  if (!sallaConfigured()) {
+    if (isMockMode()) {
+      return c.json({
+        install_url: "/dashboard?mock_install=1",
+        state: "mock-state",
+        mock: true,
+      });
+    }
+    return c.json({ error: "salla_credentials_missing" }, 500);
   }
   try {
     const state = randomUUID();
@@ -43,7 +53,7 @@ salla.get("/install", (c) => {
     return c.json({ install_url: url, state });
   } catch (err) {
     console.error("[salla/install]", err);
-    return c.json({ error: "salla_credentials_missing" }, 500);
+    return c.json({ error: "build_install_url_failed", detail: String(err) }, 500);
   }
 });
 
@@ -55,14 +65,18 @@ const exchangeSchema = z.object({
 salla.post("/oauth/exchange", zValidator("json", exchangeSchema), async (c) => {
   const { code } = c.req.valid("json");
 
-  if (isMockMode()) {
-    const seed = await ensureDemoSeed();
-    if (!seed) return c.json({ error: "seed_failed" }, 500);
-    return c.json({
-      ok: true,
-      mock: true,
-      merchant: { id: seed.merchantId, name: "متجر الأناقة" },
-    });
+  // No real Salla creds → fall back to mock-merchant exchange (local dev)
+  if (!sallaConfigured()) {
+    if (isMockMode()) {
+      const seed = await ensureDemoSeed();
+      if (!seed) return c.json({ error: "seed_failed" }, 500);
+      return c.json({
+        ok: true,
+        mock: true,
+        merchant: { id: seed.merchantId, name: "متجر الأناقة" },
+      });
+    }
+    return c.json({ error: "salla_credentials_missing" }, 500);
   }
 
   try {
