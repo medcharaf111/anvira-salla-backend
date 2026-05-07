@@ -126,6 +126,122 @@ const inboundSchema = z.object({
   body: z.string().min(1),
 });
 
+/**
+ * Realistic Saudi-context fake data generators for the "simulate" buttons.
+ */
+const SAUDI_NAMES = [
+  "سارة الحربي", "محمد القحطاني", "نوف الشمري", "عبدالله الدوسري",
+  "ريم العتيبي", "خالد الزهراني", "هند الشهري", "فيصل المالكي",
+  "لينا السبيعي", "تركي الجهني", "أمل الرشيدي", "أحمد المطيري",
+];
+const FAKE_PRODUCTS = [
+  ["عطر شرقي ذهبي", "زيت أرغان مغربي"],
+  ["عباية كلاسيكية", "حذاء جلد طبيعي"],
+  ["سيروم فيتامين سي", "ماسك الذهب", "غسول طبي"],
+  ["ساعة نسائية فضية", "حقيبة جلد"],
+  ["كحل عربي", "مسك أبيض"],
+  ["حذاء رياضي", "تيشيرت قطن"],
+];
+const SAMPLE_INBOUND = [
+  "السلام عليكم، عندكم العطر اللي شفته بالإنستغرام؟",
+  "الطلب وصل وين؟ أبي رقم التتبع",
+  "ممكن أرجع المنتج، ما عجبني المقاس",
+  "كم سعر التوصيل لجدة؟",
+  "متى ينزل المنتج الجديد؟",
+  "تقبلون مدى؟",
+  "في خصم على الباقات؟",
+];
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+function randomPhone(): string {
+  const prefix = pick(["050", "053", "055", "056", "058"]);
+  let rest = "";
+  for (let i = 0; i < 7; i++) rest += String(Math.floor(Math.random() * 10));
+  return `+966${prefix.slice(1)}${rest}`;
+}
+
+dev.post("/simulate/inbound-conversation", async (c) => {
+  if (!db) return c.json({ error: "db_unavailable" }, 503);
+  const merchantId = c.req.header("X-Merchant-Id");
+  if (!merchantId) return c.json({ error: "missing_merchant_header" }, 401);
+
+  const customerName = pick(SAUDI_NAMES);
+  const customerPhone = randomPhone();
+  const body = pick(SAMPLE_INBOUND);
+
+  const [conv] = await db
+    .insert(schema.conversations)
+    .values({
+      merchantId,
+      customerPhone,
+      customerName,
+      sallaCustomerId: `sim-${Date.now()}`,
+      status: "open",
+      lastMessageAt: new Date(),
+    })
+    .returning();
+  const [msg] = await db
+    .insert(schema.messages)
+    .values({
+      conversationId: conv.id,
+      direction: "in",
+      body,
+    })
+    .returning();
+  return c.json({ ok: true, conversation: conv, message: msg });
+});
+
+dev.post("/simulate/order", async (c) => {
+  if (!db) return c.json({ error: "db_unavailable" }, 503);
+  const merchantId = c.req.header("X-Merchant-Id");
+  if (!merchantId) return c.json({ error: "missing_merchant_header" }, 401);
+
+  const status = pick(["processing", "shipped", "delivered", "delivered", "delivered"]);
+  const products = pick(FAKE_PRODUCTS);
+  const amount = Math.round((50 + Math.random() * 950) * 100); // SAR in minor units
+  const sallaOrderId = `${10000 + Math.floor(Math.random() * 89999)}`;
+
+  const [order] = await db
+    .insert(schema.sallaOrders)
+    .values({
+      merchantId,
+      sallaOrderId,
+      customerPhone: randomPhone(),
+      status,
+      totalAmount: amount,
+      currency: "SAR",
+      rawPayload: { id: sallaOrderId, status, products, simulated: true },
+    })
+    .returning();
+  return c.json({ ok: true, order });
+});
+
+dev.post("/simulate/abandoned-cart", async (c) => {
+  if (!db) return c.json({ error: "db_unavailable" }, 503);
+  const merchantId = c.req.header("X-Merchant-Id");
+  if (!merchantId) return c.json({ error: "missing_merchant_header" }, 401);
+
+  const products = pick(FAKE_PRODUCTS);
+  const amount = Math.round((100 + Math.random() * 800) * 100);
+  const minutesAgo = Math.floor(Math.random() * 600);
+
+  const [cart] = await db
+    .insert(schema.abandonedCarts)
+    .values({
+      merchantId,
+      sallaCartId: `cart-sim-${Date.now()}`,
+      customerPhone: randomPhone(),
+      totalAmount: amount,
+      currency: "SAR",
+      rawPayload: { products, simulated: true },
+      createdAt: new Date(Date.now() - minutesAgo * 60 * 1000),
+    })
+    .returning();
+  return c.json({ ok: true, cart });
+});
+
 dev.post("/whatsapp/simulate-inbound", zValidator("json", inboundSchema), async (c) => {
   if (!db) return c.json({ error: "db_unavailable" }, 503);
   const { conversationId, customerPhone, customerName, body } = c.req.valid("json");
