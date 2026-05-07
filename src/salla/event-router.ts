@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { db, schema } from "../db/index.js";
 import { recordAbandonedCart } from "../db/repos/abandoned-carts.js";
 import { findBySallaStoreId, markUninstalled, upsertBySallaStoreId } from "../db/repos/merchants.js";
 import { recordOrder } from "../db/repos/orders.js";
@@ -91,6 +93,8 @@ export async function handleSallaEvent(
 
         // Fetch full store info from Salla — populates name/domain/email
         // when the webhook payload didn't include them
+        let storeName = String(merchantInfo.name ?? `Salla store ${sallaStoreId}`);
+        let storeEmail: string | null = null;
         try {
           const storeInfo = await fetchStoreInfo(access);
           await upsertBySallaStoreId({
@@ -105,9 +109,33 @@ export async function handleSallaEvent(
             email: storeInfo.email ?? undefined,
             plan: existing?.plan ?? "starter",
           });
+          storeName = storeInfo.name;
+          storeEmail = storeInfo.email ?? null;
           console.log(`[salla-webhook] enriched merchant from /store/info: ${storeInfo.name}`);
         } catch (err) {
           console.warn("[salla-webhook] /store/info fetch failed (token may be a different scope):", err);
+        }
+
+        // Make sure the merchant has at least one user (the store owner)
+        // so the dashboard sidebar isn't empty when switching to this merchant.
+        const merchantRow = await findBySallaStoreId(sallaStoreId);
+        if (merchantRow) {
+          const existingUsers = await db
+            .select()
+            .from(schema.users)
+            .where(eq(schema.users.merchantId, merchantRow.id));
+          if (existingUsers.length === 0) {
+            const ownerEmail =
+              storeEmail ?? `owner+${sallaStoreId}@salla-merchant.local`;
+            await db.insert(schema.users).values({
+              merchantId: merchantRow.id,
+              name: storeName,
+              email: ownerEmail,
+              whatsappDisplayName: storeName,
+              role: "owner",
+            });
+            console.log(`[salla-webhook] seeded owner user for ${storeName}`);
+          }
         }
 
         return { handled: true, note: "upserted_with_access_token" };

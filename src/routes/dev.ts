@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
@@ -21,19 +21,79 @@ dev.post("/seed", async (c) => {
   return c.json({ ok: true, ...result });
 });
 
+/**
+ * Bootstrap endpoint for the dashboard.
+ *
+ * Returns:
+ *   - merchants: all merchants (active first, then uninstalled), so the
+ *     frontend can render a switcher
+ *   - merchantId: the recommended default — the latest *real* (Salla-installed)
+ *     active merchant if any exists, else the demo merchant
+ *   - users: users for the selected merchant
+ *
+ * Optional query: ?merchantId=<id> → return that specific merchant's users
+ * (used by the frontend when a user explicitly selects a merchant in the
+ *  switcher and we re-fetch).
+ */
 dev.get("/me", async (c) => {
   if (!db) return c.json({ error: "db_unavailable" }, 503);
-  const merchants = await db.select().from(schema.merchants).limit(1);
-  if (!merchants[0]) {
-    const result = await ensureDemoSeed();
-    return c.json(result);
+
+  // Ensure at least the demo seed exists so first-time visitors aren't empty
+  const allFirst = await db.select().from(schema.merchants).limit(1);
+  if (!allFirst[0]) {
+    await ensureDemoSeed();
   }
+
+  const allMerchants = await db
+    .select()
+    .from(schema.merchants)
+    .orderBy(desc(schema.merchants.installedAt));
+
+  // Default: prefer the most recent ACTIVE merchant whose access_token is set
+  // (real Salla install) over the demo merchant.
+  const requestedId = c.req.query("merchantId");
+  const realActive = allMerchants.find(
+    (m) =>
+      !m.uninstalledAt &&
+      !!m.accessToken &&
+      m.accessToken.length > 0 &&
+      m.sallaStoreId !== "demo-1"
+  );
+  const demo = allMerchants.find((m) => m.sallaStoreId === "demo-1");
+
+  let activeMerchant = allMerchants[0];
+  if (requestedId) {
+    activeMerchant =
+      allMerchants.find((m) => m.id === requestedId) ?? activeMerchant;
+  } else if (realActive) {
+    activeMerchant = realActive;
+  } else if (demo) {
+    activeMerchant = demo;
+  }
+
   const users = await db
     .select()
     .from(schema.users)
-    .where(eq(schema.users.merchantId, merchants[0].id));
+    .where(eq(schema.users.merchantId, activeMerchant.id));
+
   return c.json({
-    merchantId: merchants[0].id,
+    merchantId: activeMerchant.id,
+    merchant: {
+      id: activeMerchant.id,
+      sallaStoreId: activeMerchant.sallaStoreId,
+      name: activeMerchant.name,
+      domain: activeMerchant.domain,
+      isDemo: activeMerchant.sallaStoreId === "demo-1",
+    },
+    merchants: allMerchants.map((m) => ({
+      id: m.id,
+      sallaStoreId: m.sallaStoreId,
+      name: m.name,
+      domain: m.domain,
+      isDemo: m.sallaStoreId === "demo-1",
+      uninstalled: !!m.uninstalledAt,
+      installedAt: m.installedAt,
+    })),
     users: users.map((u) => ({
       id: u.id,
       name: u.name,
