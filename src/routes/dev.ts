@@ -4,6 +4,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { db, schema } from "../db/index.js";
 import { ensureDemoSeed } from "../seed/demo-seed.js";
+import { runWorkflowsForEvent } from "../services/workflow-runner.js";
 
 /**
  * Developer / demo-only routes.
@@ -203,18 +204,33 @@ dev.post("/simulate/order", async (c) => {
   const amount = Math.round((50 + Math.random() * 950) * 100); // SAR in minor units
   const sallaOrderId = `${10000 + Math.floor(Math.random() * 89999)}`;
 
+  const customerPhone = randomPhone();
   const [order] = await db
     .insert(schema.sallaOrders)
     .values({
       merchantId,
       sallaOrderId,
-      customerPhone: randomPhone(),
+      customerPhone,
       status,
       totalAmount: amount,
       currency: "SAR",
       rawPayload: { id: sallaOrderId, status, products, simulated: true },
     })
     .returning();
+
+  // Fire enabled workflows (e.g. order-confirmation template auto-sends thanks)
+  await runWorkflowsForEvent({
+    merchantId,
+    event: "order.created",
+    data: {
+      id: sallaOrderId,
+      status,
+      customer: { mobile: customerPhone },
+      total: { amount: amount / 100, currency: "SAR" },
+      products: products.map((p) => ({ name: p })),
+    },
+  });
+
   return c.json({ ok: true, order });
 });
 
@@ -226,19 +242,35 @@ dev.post("/simulate/abandoned-cart", async (c) => {
   const products = pick(FAKE_PRODUCTS);
   const amount = Math.round((100 + Math.random() * 800) * 100);
   const minutesAgo = Math.floor(Math.random() * 600);
+  const customerPhone = randomPhone();
+  const sallaCartId = `cart-sim-${Date.now()}`;
 
   const [cart] = await db
     .insert(schema.abandonedCarts)
     .values({
       merchantId,
-      sallaCartId: `cart-sim-${Date.now()}`,
-      customerPhone: randomPhone(),
+      sallaCartId,
+      customerPhone,
       totalAmount: amount,
       currency: "SAR",
       rawPayload: { products, simulated: true },
       createdAt: new Date(Date.now() - minutesAgo * 60 * 1000),
     })
     .returning();
+
+  // Fire enabled workflows — typically the cart-recovery template
+  // auto-drafts and sends a Gemini WhatsApp message
+  await runWorkflowsForEvent({
+    merchantId,
+    event: "abandoned.cart",
+    data: {
+      id: sallaCartId,
+      customer: { mobile: customerPhone },
+      total: { amount: amount / 100, currency: "SAR" },
+      products: products.map((p) => ({ name: p })),
+    },
+  });
+
   return c.json({ ok: true, cart });
 });
 

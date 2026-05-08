@@ -3,6 +3,7 @@ import { db, schema } from "../db/index.js";
 import { recordAbandonedCart } from "../db/repos/abandoned-carts.js";
 import { findBySallaStoreId, markUninstalled, upsertBySallaStoreId } from "../db/repos/merchants.js";
 import { recordOrder } from "../db/repos/orders.js";
+import { runWorkflowsForEvent } from "../services/workflow-runner.js";
 import { fetchStoreInfo } from "./client.js";
 
 /**
@@ -188,6 +189,12 @@ export async function handleSallaEvent(
         currency: typeof totalRaw.currency === "string" ? totalRaw.currency : "SAR",
         rawPayload: orderData,
       });
+      // Fire any enabled workflows that listen on order.created / order.updated
+      await runWorkflowsForEvent({
+        merchantId: merchant.id,
+        event,
+        data: orderData,
+      });
       return { handled: true };
     }
 
@@ -213,7 +220,13 @@ export async function handleSallaEvent(
         currency: typeof totalRaw.currency === "string" ? totalRaw.currency : "SAR",
         rawPayload: cartData,
       });
-      // TODO: enqueue cart recovery WhatsApp send (next pillar)
+      // Fire enabled workflows — typically the cart-recovery template
+      // sends an AI-drafted WhatsApp here automatically
+      await runWorkflowsForEvent({
+        merchantId: merchant.id,
+        event,
+        data: cartData,
+      });
       return { handled: true };
     }
 
